@@ -1,5 +1,5 @@
 '''
-Message Board Admin Forwarder
+Bulletin Board Admin Forwarder
 =============================
 
 send and receive messages to
