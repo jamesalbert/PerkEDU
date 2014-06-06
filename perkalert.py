@@ -17,12 +17,12 @@ import imaplib
 '''
 user variables
 '''
-phost = 'http://apps.perkedu.com/jetwebservice/'
+phost = 'http://secret.url'
 shost = 'smtp.gmail.com'
 sport = 587
-user = 'jamesrobertalbert'
-passw = 'snowjob69'
-phone = '3239290967@vtext.com'
+user = 'nobody'
+passw = 'nothing'
+phone = '5555555555'
 
 
 def set_interval(func, sec):
