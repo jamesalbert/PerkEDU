@@ -12,6 +12,7 @@ from datetime import datetime
 from os import environ
 from peewee import *
 import json
+import bulletin
 
 APP = Flask(__name__)
 APP.config['SECRET_KEY'] = environ.get('PESK')
@@ -28,7 +29,7 @@ APP.config['STORMPATH_SOCIAL'] = {
 SPM = StormpathManager(APP)
 DB = MySQLDatabase('perkedu',
                    host='localhost',
-                   user='root')
+                   user='user')
 
 
 """
@@ -76,6 +77,13 @@ def addperk():
 """
 Native Functions
 """
+
+
+def bb_dt():
+    '''datetime stamp for bulletin board'''
+    dt = datetime.now()
+    now = dt.strftime('%Y-%m-%d %H:%M:%S')
+    return now
 
 
 def current_time():
@@ -152,6 +160,145 @@ def check_wifi():
 def fivehundred(excp):
     '''handle general 500 errors'''
     return excp.message
+
+"""
+ BULLETIN BOARD CRUD
+"""
+
+
+@APP.route('/postquestion', methods=['POST'])
+@login_required
+def postquestion():
+    '''post question to bulletin board'''
+    try:
+        now = bb_dt()
+        payload = json.loads(request.data)
+        payload['modified'] = now
+        payload['posted'] = now
+        payload['answers'] = 0
+        payload['studentid'] = user.email
+        payload['name'] = user.full_name
+        bulletin.post_question(**payload)
+        return jsonify({'status': 'question posted'})
+    except Exception as e:
+        return jsonify({'error': e.message})
+
+
+@APP.route('/postanswer', methods=['POST'])
+@login_required
+def postanswer():
+    '''post answer to bulletin board'''
+    try:
+        now = bb_dt()
+        payload = json.loads(request.data)
+        payload['modified'] = now
+        payload['posted'] = now
+        payload['studentid'] = user.email
+        payload['name'] = user.full_name
+        payload['rating'] = 0
+        question = bulletin.report_questions(id=payload['questionid'])
+        answers = question['bodies'][0]['answers']
+        bulletin.post_answer(**payload)
+        bulletin.edit_question(**{'answers': answers+1,
+                                  'id': payload['questionid']})
+        return jsonify({'status': 'answer posted'})
+    except Exception as e:
+        return jsonify({'error': e.message})
+
+
+@APP.route('/reportquestions', methods=['GET'])
+@login_required
+def postquestions():
+    '''report questions from bulletin board'''
+    try:
+        questions = bulletin.report_questions()
+        return jsonify({'status': questions['bodies']})
+    except Exception as e:
+        return jsonify({'error': e.message})
+
+
+@APP.route('/reportanswers', defaults={'qid': None}, methods=['GET'])
+@APP.route('/reportanswers/<int:qid>')
+@login_required
+def postanswers(qid):
+    '''report answers from bulletin board'''
+    try:
+        answers = bulletin.report_answers(qid=qid)
+        return jsonify({'status': answers['bodies']})
+    except Exception as e:
+        return jsonify({'error': e.message})
+
+
+@APP.route('/editquestion', methods=['PUT'])
+@login_required
+def editquestion():
+    '''edit questions from bulletin board'''
+    try:
+        now = bb_dt()
+        payload = json.loads(request.data)
+
+        if user.email != payload.pop('studentid'):
+            return jsonify({'status': 'you can\'t edit questions that aren\'t yours.'})
+
+        payload['modified'] = now
+        bulletin.edit_question(**payload)
+        return jsonify({'status': 'question has been modified'})
+    except Exception as e:
+        return jsonify({'error': e.message})
+
+
+@APP.route('/editanswer', methods=['PUT'])
+@login_required
+def editanswer():
+    '''edit answers from bulletin board'''
+    try:
+        now = bb_dt()
+        payload = json.loads(request.data)
+
+        if user.email != payload.pop('studentid'):
+            return jsonify({'status': 'you can\'t edit answers that aren\'t yours.'})
+
+        payload['modified'] = now
+        bulletin.edit_answer(**payload)
+        return jsonify({'status': 'answer has been modified'})
+    except Exception as e:
+        return jsonify({'error': e.message})
+
+
+@APP.route('/deletequestion', methods=['DELETE'])
+@login_required
+def deletequestion():
+    '''delete questions from bulletin board'''
+    try:
+        payload = json.loads(request.data)
+
+        if user.email != payload.pop('studentid'):
+            return jsonify({'status': 'you can\'t delete questions that aren\'t yours.'})
+
+        id = payload['id']
+        bulletin.delete_answer(qid=id)
+        bulletin.delete_question(id)
+        return jsonify({'status': 'question deleted'})
+    except Exception as e:
+        return jsonify({'error': e.message})
+
+
+@APP.route('/deleteanswer', methods=['DELETE'])
+@login_required
+def deleteanswer():
+    '''delete answers from bulletin board'''
+    try:
+        payload = json.loads(request.data)
+
+        if user.email != payload.pop('studentid'):
+            return jsonify({'status': 'you can\'t delete answers that aren\'t yours.'})
+
+        id = payload['id']
+        bulletin.delete_answer(id)
+        return jsonify({'status': 'answer deleted'})
+    except Exception as e:
+        return jsonify({'error': e.message})
+
 
 """
 POST Routes
@@ -298,6 +445,12 @@ GET Routes
 """
 
 
+@APP.route('/ping', methods=['GET'])
+def ping():
+    '''test ping'''
+    return jsonify({'status': True})
+
+
 @APP.route('/', methods=['GET'])
 @login_required
 def main():
@@ -359,4 +512,4 @@ def myperks():
 
 
 if __name__ == '__main__':
-    APP.run()
+    APP.run(host="0.0.0.0", port=80)
