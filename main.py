@@ -10,69 +10,78 @@ from flask.ext.stormpath import StormpathManager, login_required, user
 from subprocess import Popen, PIPE
 from datetime import datetime
 from os import environ
-from peewee import *
-import json
 import bulletin
+import perks
+import json
 
 APP = Flask(__name__)
-APP.config['SECRET_KEY'] = environ.get('PESK')
-APP.config['STORMPATH_API_KEY_FILE'] = environ.get('PEAKFILE')
+APP.config['SECRET_KEY'] = "2UXM8ESTB1MVPEO8DOBFDVMBE"  # environ.get('PESK')
+APP.config['STORMPATH_API_KEY_FILE'] = "/home/jbert/.stormpath/apiKey.properties"  # environ.get('PEAKFILE')
 APP.config['STORMPATH_APPLICATION'] = 'PerkEDU'
 APP.config['STORMPATH_ENABLE_FACEBOOK'] = True
 APP.config['STORMPATH_SOCIAL'] = {
     'FACEBOOK': {
-        'app_id': environ.get('PEFAK'),
-        'app_secret': environ.get('PEFAS'),
+        'app_id': "691041867600496",  # environ.get('PEFAK'),
+        'app_secret': "2ddc7a5e61d2cc67d3b0b3fd41c962e9"  # environ.get('PEFAS'),
     }
 }
 
 SPM = StormpathManager(APP)
-DB = MySQLDatabase('perkedu',
-                   host='localhost',
-                   user='user')
-
 
 """
-PerkEDU Database
+ Perks CRUD
 """
 
 
-class UnknownField(object):
-    pass
-
-
-class BaseModel(Model):
-    class Meta:
-        database = DB
-
-
-class Perks(BaseModel):
-    cost = FloatField()
-    description = CharField(max_length=255)
-    name = CharField(max_length=50)
-
-    class Meta:
-        db_table = 'perks'
-
-
-@APP.route('/addperk', methods=['POST'])
+@APP.route('/postperk', methods=['POST'])
 @login_required
-def addperk():
-    '''add perk to database'''
+def postperk():
+    '''post perk to database'''
     try:
         payload = json.loads(request.data)
-        name = payload['name']
-        desc = payload['description']
-        cost = payload['cost']
-        pquery = Perks.insert(name=name,
-                              description=desc,
-                              cost=cost)
-        pquery.execute()
-        return jsonify({'status': 'perk added'})
+        perks.post_perk(**payload)
+        return jsonify({'status': 'perk posted'})
+    except (OSError, IOError) as excp:
+        return jsonify({'error': excp.message})
+
+
+@APP.route('/reportperks', defaults={'id': None}, methods=['GET'])
+@APP.route('/reportperk/<int:id>')
+@login_required
+def reportperks(id):
+    '''report perk from database'''
+    try:
+        res = perks.report_perk(id)
+        return jsonify(res)
 
     except (OSError, IOError) as excp:
         return jsonify({'error': excp.message})
 
+
+@APP.route('/editperk', methods=['PUT'])
+@login_required
+def editperk():
+    '''edit perk from database'''
+    try:
+        payload = json.loads(request.data)
+
+        perks.edit_perk(**payload)
+        return jsonify({'status': 'perk edited'})
+
+    except (OSError, IOError) as excp:
+        return jsonify({'error': excp.message})
+
+
+@APP.route('/deleteperk/<int:id>', methods=['DELETE'])
+@login_required
+def deleteperk(id):
+    '''delete perk from database'''
+    try:
+        perks.delete_perk(id)
+        return jsonify({'status': 'perk deleted'})
+
+    except (OSError, IOError) as excp:
+        return jsonify({'error': excp.message})
 
 """
 Native Functions
@@ -162,7 +171,7 @@ def fivehundred(excp):
     return excp.message
 
 """
- BULLETIN BOARD CRUD
+ Bulletin Board CRUD
 """
 
 
@@ -235,7 +244,7 @@ def editquestion():
     '''edit questions from bulletin board'''
     try:
         now = bb_dt()
-        payload = json.loads(request.data)
+        payload = json.loads(request.database)
 
         if user.email != payload.pop('studentid'):
             return jsonify({'status': 'you can\'t edit questions that aren\'t yours.'})
