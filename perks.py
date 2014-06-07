@@ -21,9 +21,12 @@ class BaseModel(pw.Model):
 
 
 class Perks(BaseModel):
+    code = pw.TextField()
     cost = pw.FloatField()
     description = pw.CharField(max_length=255)
-    name = pw.CharField(max_length=50)
+    expires = pw.DateTimeField()
+    image_link = pw.TextField()
+    name = pw.CharField(max_length=255)
 
     class Meta:
         db_table = 'perks'
@@ -32,12 +35,18 @@ class Perks(BaseModel):
 @execute
 def post_perk(**kwargs):
     '''post perk to database'''
+    '''
     name = kwargs['name']
     desc = kwargs['description']
     cost = kwargs['cost']
-    return Perks.insert(name=name,
-                        description=desc,
-                        cost=cost)
+    code = kwargs['code']
+    '''
+    return Perks.insert(**kwargs)
+'''
+name=name,
+description=desc,
+cost=cost)
+'''
 
 
 @execute

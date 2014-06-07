@@ -4,8 +4,16 @@ Perk Utilities
 random home-made functions
 '''
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from subprocess import PIPE, Popen
+import os
+import base64
+
+
+def gen_perk_code():
+    '''generate a secure perk code'''
+    t = os.urandom(32)
+    return base64.b64encode(t)
 
 
 def execute(fn):
@@ -39,9 +47,17 @@ def current_time():
     '''get current time'''
     try:
         time_now = datetime.today()
-        return time_now.strftime('%I:%M:%S %m-%d-%Y')
+        return time_now.strftime('%Y-%m-%d %H:%M:%S')
     except (OSError, IOError) as excp:
         return {'error': excp.message}
+
+
+def int_to_days(i):
+    return timedelta(i)
+
+
+def str_to_dt(s):
+    return datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
 
 
 def check_points(user):
@@ -49,8 +65,8 @@ def check_points(user):
     try:
         last_point = user.custom_data['last_point']
         time_now = current_time()
-        last_point_dt = datetime.strptime(last_point, '%I:%M:%S %m-%d-%Y')
-        time_now_dt = datetime.strptime(time_now, '%I:%M:%S %m-%d-%Y')
+        last_point_dt = str_to_dt(last_point)
+        time_now_dt = str_to_dt(time_now)
         current_diff = time_now_dt - last_point_dt
         minutes_passed = current_diff.seconds / 60
         if minutes_passed < 15:

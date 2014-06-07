@@ -5,13 +5,14 @@ them to earn points for being on campus which they
 can use to redeem rewards.
 '''
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, make_response
 from flask.ext.stormpath import StormpathManager, login_required, user
 # from os import environ
 import bulletin
 import perks
 import utils
 import json
+import wolframalpha
 
 APP = Flask(__name__)
 sakf = 'STORMPATH_API_KEY_FILE'
@@ -29,6 +30,7 @@ APP.config['STORMPATH_SOCIAL'] = {
 }
 
 SPM = StormpathManager(APP)
+CLI = wolframalpha.Client('9P82HJ-JQ6WQEXXVW')
 
 
 @APP.route('/welcome', methods=['PUT'])
@@ -61,6 +63,10 @@ def postperk():
     '''post perk to database'''
     try:
         payload = json.loads(request.data)
+        dtl = utils.int_to_days(payload.pop('dtl'))
+        now = utils.str_to_dt(utils.current_time())
+        payload['expires'] = now + dtl
+        payload['code'] = utils.gen_perk_code()
         perks.post_perk(**payload)
         return jsonify({'status': 'perk posted'})
     except (OSError, IOError) as excp:
@@ -104,6 +110,107 @@ def deleteperk(id):
 
     except (OSError, IOError) as excp:
         return jsonify({'error': excp.message})
+
+
+@APP.route('/clearperks', methods=['PUT'])
+@login_required
+def clearperks():
+    '''clear perks from user inventory'''
+    try:
+        user.custom_data['perks'] = {}
+        msg = '%s\'s perks have been deleted'
+        return jsonify({'status': msg % user.full_name})
+    except Exception as e:
+        return jsonify({'error': e.message})
+    finally:
+        user.custom_data.save()
+
+
+@APP.route('/addpoints/<int:total>', methods=['PUT'])
+@login_required
+def addpoints(total):
+    '''add points to user inventory'''
+    try:
+        user.custom_data['points'] = total
+        msg = '%s received %s points'
+        return jsonify({'status': msg % (user.full_name, total)})
+    except Exception as e:
+        return jsonify({'error': e.message})
+    finally:
+        user.custom_data.save()
+
+
+@APP.route('/useperk', methods=['POST'])
+@login_required
+def useperk():
+    '''use perk, deactivating it for further use'''
+    try:
+        payload = json.loads(request.data)
+        id = str(payload['id'])
+        cust = user.custom_data
+        if id not in cust['perks']:
+            return jsonify({'error': 'you do not have this perk'})
+
+        perk = cust['perks'][id]
+        now = utils.str_to_dt(utils.current_time())
+        exp = utils.str_to_dt(perk['expires'])
+        if now > exp:
+            perk['active'] = False
+            return jsonify({'error': 'your perk has expired.'})
+
+        name = user.full_name
+        pname = perk['name']
+        if not perk['active']:
+            return jsonify({'error': 'this perk has been used or expired'})
+
+        user.custom_data['perks'][id]['active'] = False
+        return jsonify({'status': '%s just used %s' % (name, pname)})
+
+    except (OSError, IOError) as excp:
+        return jsonify({'error': excp.message})
+
+    finally:
+        user.custom_data.save()
+
+
+@APP.route('/redeem', methods=['POST'])
+@login_required
+def redeem():
+    '''
+    redeem specified perk(
+    id (int) - perk id
+    )
+    '''
+    try:
+        payload = json.loads(request.data)
+        pbody = perks.report_perk(payload['id'])
+        perk = pbody['bodies'][0]
+        id = perk['id']
+
+        if id in user.custom_data['perks']:
+            return jsonify({'error': 'perk already redeemed and active'})
+        if user.custom_data['points'] < perk['cost']:
+            return jsonify({'error': 'insufficient funds'})
+        if utils.str_to_dt(utils.current_time()) > perk['expires']:
+            return jsonify({'error': 'perk has expired'})
+
+        user.custom_data['points'] -= perk['cost']
+        user.custom_data['perks'][id] = {
+            'name': perk['name'],
+            'description': perk['description'],
+            'cost': perk['cost'],
+            'code': perk['code'],
+            'expires': str(perk['expires']),
+            'active': True
+        }
+        perks.edit_perk(**{'code': utils.gen_perk_code(), 'id': id})
+        return jsonify({'status': 'perk redeemed successfully'})
+
+    except (OSError, IOError) as excp:
+        return jsonify({'error': excp.message})
+
+    finally:
+        user.custom_data.save()
 
 
 """
@@ -328,63 +435,6 @@ def checkout():
         user.custom_data.save()
 
 
-@APP.route('/useperk', methods=['POST'])
-@login_required
-def useperk():
-    '''use perk, deactivating it for further use'''
-    try:
-        payload = json.loads(request.data)
-        id = str(payload['id'])
-        cust = user.custom_data
-        if id not in cust['perks']:
-            return jsonify({'error': 'you do not have this perk'})
-
-        name = user.full_name
-        pname = cust['perks'][id]['name']
-        if not cust['perks'][id]['active']:
-            return jsonify({'error': 'this perk has been used or expired'})
-
-        user.custom_data['perks'][id]['active'] = False
-        return jsonify({'status': '%s just used %s' % (name, pname)})
-
-    except (OSError, IOError) as excp:
-        return jsonify({'error': excp.message})
-
-    finally:
-        user.custom_data.save()
-
-
-@APP.route('/redeem', methods=['POST'])
-@login_required
-def redeem():
-    '''redeem specified perk'''
-    try:
-        payload = json.loads(request.data)
-        pbody = perks.report_perk(payload['id'])
-        perk = pbody['bodies'][0]
-        id = perk['id']
-
-        if id in user.custom_data['perks']:
-            return jsonify({'error': 'perk already redeemed and active'})
-        if user.custom_data['points'] < perk['cost']:
-            return jsonify({'error': 'insufficient funds'})
-
-        user.custom_data['points'] -= perk.cost
-        user.custom_data['perks'][id] = {
-            'name': perk['name'],
-            'description': perk['description'],
-            'cost': perk['cost'],
-            'active': True
-        }
-        return jsonify({'status': 'perk redeemed successfully'})
-
-    except (OSError, IOError) as excp:
-        return jsonify({'error': excp.message})
-
-    finally:
-        user.custom_data.save()
-
-
 """
 GET Routes
 """
@@ -405,6 +455,21 @@ def main():
         return jsonify({'status': 'logged in as %s' % name})
     except (OSError, IOError) as excp:
         return jsonify({'error': excp.message})
+
+
+@APP.route('/wolfram/query', methods=['POST'])
+@login_required
+def query():
+    '''wolfram alpha extension'''
+    try:
+        payload = json.loads(request.data)
+        res = CLI.query(payload['query'])
+        s = str()
+        for i in res.pods:
+            s += '<p>%s</p></ br>' % i.text
+        return make_response(s)
+    except Exception as e:
+        return jsonify({'error': e.message})
 
 
 @APP.route('/profile', methods=['GET'])
