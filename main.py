@@ -7,26 +7,48 @@ can use to redeem rewards.
 
 from flask import Flask, jsonify, request
 from flask.ext.stormpath import StormpathManager, login_required, user
-from subprocess import Popen, PIPE
-from datetime import datetime
-from os import environ
+# from os import environ
 import bulletin
 import perks
+import utils
 import json
 
 APP = Flask(__name__)
+sakf = 'STORMPATH_API_KEY_FILE'
+akpp = '/home/jbert/.stormpath/apiKey.properties'
+apps = '2ddc7a5e61d2cc67d3b0b3fd41c962e9'
 APP.config['SECRET_KEY'] = "2UXM8ESTB1MVPEO8DOBFDVMBE"  # environ.get('PESK')
-APP.config['STORMPATH_API_KEY_FILE'] = "/home/jbert/.stormpath/apiKey.properties"  # environ.get('PEAKFILE')
+APP.config[sakf] = akpp  # environ.get('PEAKFILE')
 APP.config['STORMPATH_APPLICATION'] = 'PerkEDU'
 APP.config['STORMPATH_ENABLE_FACEBOOK'] = True
 APP.config['STORMPATH_SOCIAL'] = {
     'FACEBOOK': {
         'app_id': "691041867600496",  # environ.get('PEFAK'),
-        'app_secret': "2ddc7a5e61d2cc67d3b0b3fd41c962e9"  # environ.get('PEFAS'),
+        'app_secret': apps  # environ.get('PEFAS'),
     }
 }
 
 SPM = StormpathManager(APP)
+
+
+@APP.route('/welcome', methods=['PUT'])
+@login_required
+def welcome():
+    '''assures user has points, '''
+    try:
+        if 'points' not in user.custom_data:
+            user.custom_data['points'] = 100
+
+        if 'perks' not in user.custom_data:
+            user.custom_data['perks'] = {}
+
+        return jsonify({'status': 'Welcome. You\'re all set to earn points.'})
+
+    except Exception as e:
+        return jsonify({'error': e.message})
+    finally:
+        user.custom_data.save()
+
 
 """
  Perks CRUD
@@ -83,92 +105,6 @@ def deleteperk(id):
     except (OSError, IOError) as excp:
         return jsonify({'error': excp.message})
 
-"""
-Native Functions
-"""
-
-
-def bb_dt():
-    '''datetime stamp for bulletin board'''
-    dt = datetime.now()
-    now = dt.strftime('%Y-%m-%d %H:%M:%S')
-    return now
-
-
-def current_time():
-    '''get current time'''
-    try:
-        time_now = datetime.today()
-        return time_now.strftime('%I:%M:%S %m-%d-%Y')
-    except (OSError, IOError) as excp:
-        return jsonify({'error': excp.message})
-
-
-def check_points():
-    '''check last received point'''
-    try:
-        last_point = user.custom_data['last_point']
-        time_now = current_time()
-        last_point_dt = datetime.strptime(last_point, '%I:%M:%S %m-%d-%Y')
-        time_now_dt = datetime.strptime(time_now, '%I:%M:%S %m-%d-%Y')
-        current_diff = time_now_dt - last_point_dt
-        minutes_passed = current_diff.seconds / 60
-        if minutes_passed < 15:
-            message = 'stay checked in for %d more minutes to earn more points'
-            diff = 15 - int(minutes_passed)
-            return {'error': message % diff}
-        else:
-            return True
-
-    except (OSError, IOError) as excp:
-        return {'error': excp.message}
-
-
-def connected():
-    '''check internet connection'''
-    try:
-        cmd = ['ping', 'google.com', '-c', '1']
-        res = Popen(cmd, stdout=PIPE, stderr=PIPE)
-        res.wait()
-        out, err = res.communicate()
-        res_code = res.returncode
-        if err:
-            raise OSError(err)
-
-        if res_code == 0:
-            return True
-
-        return False
-
-    except (OSError, IOError) as excp:
-        return {'error': excp.message}
-
-
-def check_wifi():
-    '''check wifi connection'''
-    try:
-        cmd = ['nmcli', 'connection', 'show', 'active']
-        res = Popen(cmd, stdout=PIPE, stderr=PIPE)
-        res.wait()
-        out, err = res.communicate()
-        if err:
-            raise OSError(err)
-
-        if 'vega' in out and connected():
-            return True
-        elif 'vega' in out and not connected():
-            return None
-        else:
-            return False
-
-    except (OSError, IOError) as excp:
-        return jsonify({'error': excp.message})
-
-
-@APP.errorhandler(500)
-def fivehundred(excp):
-    '''handle general 500 errors'''
-    return excp.message
 
 """
  Bulletin Board CRUD
@@ -180,7 +116,7 @@ def fivehundred(excp):
 def postquestion():
     '''post question to bulletin board'''
     try:
-        now = bb_dt()
+        now = utils.bb_dt()
         payload = json.loads(request.data)
         payload['modified'] = now
         payload['posted'] = now
@@ -198,7 +134,7 @@ def postquestion():
 def postanswer():
     '''post answer to bulletin board'''
     try:
-        now = bb_dt()
+        now = utils.bb_dt()
         payload = json.loads(request.data)
         payload['modified'] = now
         payload['posted'] = now
@@ -243,11 +179,12 @@ def postanswers(qid):
 def editquestion():
     '''edit questions from bulletin board'''
     try:
-        now = bb_dt()
+        now = utils.bb_dt()
         payload = json.loads(request.database)
 
         if user.email != payload.pop('studentid'):
-            return jsonify({'status': 'you can\'t edit questions that aren\'t yours.'})
+            msg = 'you can\'t edit questions that aren\'t yours.'
+            return jsonify({'status': msg})
 
         payload['modified'] = now
         bulletin.edit_question(**payload)
@@ -261,11 +198,12 @@ def editquestion():
 def editanswer():
     '''edit answers from bulletin board'''
     try:
-        now = bb_dt()
+        now = utils.bb_dt()
         payload = json.loads(request.data)
 
         if user.email != payload.pop('studentid'):
-            return jsonify({'status': 'you can\'t edit answers that aren\'t yours.'})
+            msg = 'you can\'t edit answers that aren\'t yours.'
+            return jsonify({'status': msg})
 
         payload['modified'] = now
         bulletin.edit_answer(**payload)
@@ -282,7 +220,8 @@ def deletequestion():
         payload = json.loads(request.data)
 
         if user.email != payload.pop('studentid'):
-            return jsonify({'status': 'you can\'t delete questions that aren\'t yours.'})
+            msg = 'you can\'t delete questions that aren\'t yours.'
+            return jsonify({'status': msg})
 
         id = payload['id']
         bulletin.delete_answer(qid=id)
@@ -300,7 +239,8 @@ def deleteanswer():
         payload = json.loads(request.data)
 
         if user.email != payload.pop('studentid'):
-            return jsonify({'status': 'you can\'t delete answers that aren\'t yours.'})
+            msg = 'you can\'t delete answers that aren\'t yours.'
+            return jsonify({'status': msg})
 
         id = payload['id']
         bulletin.delete_answer(id)
@@ -324,17 +264,14 @@ def checkin():
             return jsonify({'status': 'you are already checked in'})
 
         else:
-            check_res = check_points()
+            check_res = utils.check_points(user)
             if isinstance(check_res, dict):
                 return jsonify(check_res)
 
-        if 'points' not in cust:
-            user.custom_data['points'] = 100
-
-        if check_wifi():
+        if utils.check_wifi():
             user.custom_data['checked_in'] = True
             user.custom_data['points'] += 10
-            user.custom_data['last_point'] = current_time()
+            user.custom_data['last_point'] = utils.current_time()
             return jsonify({'status': 'you are now checked into campus'})
 
         return jsonify({'error': 'not logged into school wifi'})
@@ -354,12 +291,12 @@ def checkup():
         if not user.custom_data['checked_in']:
             return jsonify({'error': 'you are not checked in'})
 
-        check_res = check_points()
+        check_res = utils.check_points(user)
         if isinstance(check_res, dict):
             return jsonify(check_res)
 
-        if check_wifi():
-            user.custom_data['last_point'] = current_time()
+        if utils.check_wifi():
+            user.custom_data['last_point'] = utils.current_time()
             user.custom_data['points'] += 2
             name = user.given_name
             return jsonify({'status': '%s just earned two more points' % name})
@@ -422,22 +359,21 @@ def useperk():
 def redeem():
     '''redeem specified perk'''
     try:
-        if 'perks' not in user.custom_data:
-            user.custom_data['perks'] = {}
-
         payload = json.loads(request.data)
-        perk = Perks.get(Perks.id == payload['id'])
+        pbody = perks.report_perk(payload['id'])
+        perk = pbody['bodies'][0]
+        id = perk['id']
 
-        if perk.id in user.custom_data['perks']:
+        if id in user.custom_data['perks']:
             return jsonify({'error': 'perk already redeemed and active'})
-        if user.custom_data['points'] < perk.cost:
+        if user.custom_data['points'] < perk['cost']:
             return jsonify({'error': 'insufficient funds'})
 
         user.custom_data['points'] -= perk.cost
-        user.custom_data['perks'][perk.id] = {
-            'name': perk.name,
-            'description': perk.description,
-            'cost': perk.cost,
+        user.custom_data['perks'][id] = {
+            'name': perk['name'],
+            'description': perk['description'],
+            'cost': perk['cost'],
             'active': True
         }
         return jsonify({'status': 'perk redeemed successfully'})
@@ -518,6 +454,12 @@ def myperks():
         return jsonify({'status': cust['perks']})
     except (OSError, IOError) as excp:
         return jsonify({'error': excp.message})
+
+
+@APP.errorhandler(500)
+def fivehundred(excp):
+    '''handle general 500 errors'''
+    return excp.message
 
 
 if __name__ == '__main__':
