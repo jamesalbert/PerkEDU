@@ -7,7 +7,7 @@ can use to redeem rewards.
 
 from flask import Flask, jsonify, request, make_response, render_template
 from flask.ext.stormpath import StormpathManager, login_required, user
-# from os import environ
+from os import environ
 from libperk import bulletin, perks, utils, access_control
 import json
 import wolframalpha
@@ -16,8 +16,7 @@ import praw
 APP = Flask(__name__)
 sakf = 'STORMPATH_API_KEY_FILE'
 akpp = '/home/jbert/.stormpath/apiKey.properties'
-apps = '2ddc7a5e61d2cc67d3b0b3fd41c962e9'
-APP.config['SECRET_KEY'] = "2UXM8ESTB1MVPEO8DOBFDVMBE"  # environ.get('PESK')
+APP.config['SECRET_KEY'] = # environ.get('PESK')
 APP.config[sakf] = akpp  # environ.get('PEAKFILE')
 APP.config['STORMPATH_APPLICATION'] = 'PerkEDU'
 APP.config['STORMPATH_REDIRECT_URL'] = '/welcome'
@@ -25,14 +24,14 @@ APP.config['STORMPATH_REDIRECT_URL'] = '/welcome'
 APP.config['STORMPATH_ENABLE_FACEBOOK'] = True
 APP.config['STORMPATH_SOCIAL'] = {
     'FACEBOOK': {
-        'app_id': "691041867600496",  # environ.get('PEFAK'),
-        'app_secret': apps  # environ.get('PEFAS'),
+        'app_id': # environ.get('PEFAK'),
+        'app_secret': # environ.get('PEFAS'),
     }
 }
 '''
 
 SPM = StormpathManager(APP)
-CLI = wolframalpha.Client('9P82HJ-JQ6WQEXXVW')
+CLI = wolframalpha.Client(environ.get('WFK'))
 RED = praw.Reddit(user_agent='PerkEDU https://github.com/jamesalbert/PerkEDU')
 
 
