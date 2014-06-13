@@ -5,39 +5,68 @@ them to earn points for being on campus which they
 can use to redeem rewards.
 '''
 
-from flask import Flask, jsonify, request, make_response
+from flask import Flask, jsonify, request, make_response, render_template
 from flask.ext.stormpath import StormpathManager, login_required, user
-from os import environ
-from libperk import bulletin, perks, utils
+# from os import environ
+from libperk import bulletin, perks, utils, access_control
 import json
 import wolframalpha
+import praw
 
 APP = Flask(__name__)
-APP.config['SECRET_KEY'] = environ.get('PESK')
-APP.config['STORMPATH_API_KEY_FILE'] = environ.get('PEAKFILE')
+sakf = 'STORMPATH_API_KEY_FILE'
+akpp = '/home/jbert/.stormpath/apiKey.properties'
+apps = '2ddc7a5e61d2cc67d3b0b3fd41c962e9'
+APP.config['SECRET_KEY'] = "2UXM8ESTB1MVPEO8DOBFDVMBE"  # environ.get('PESK')
+APP.config[sakf] = akpp  # environ.get('PEAKFILE')
 APP.config['STORMPATH_APPLICATION'] = 'PerkEDU'
+APP.config['STORMPATH_REDIRECT_URL'] = '/welcome'
+'''
 APP.config['STORMPATH_ENABLE_FACEBOOK'] = True
 APP.config['STORMPATH_SOCIAL'] = {
     'FACEBOOK': {
-        'app_id': environ.get('PEFAK'),
-        'app_secret': environ.get('PEFAS'),
+        'app_id': "691041867600496",  # environ.get('PEFAK'),
+        'app_secret': apps  # environ.get('PEFAS'),
     }
 }
+'''
 
 SPM = StormpathManager(APP)
-CLI = wolframalpha.Client(environ.get('WFK'))
+CLI = wolframalpha.Client('9P82HJ-JQ6WQEXXVW')
+RED = praw.Reddit(user_agent='PerkEDU https://github.com/jamesalbert/PerkEDU')
 
 
-@APP.route('/welcome', methods=['PUT'])
+class Error(Exception):
+    pass
+
+
+@APP.route('/loggedin', methods=['GET'])
+@access_control.crossdomain(origin='*')
+@login_required
+def loggedin():
+    return jsonify({'status': True})
+
+
+@APP.route('/success', methods=['GET'])
+@access_control.crossdomain(origin='*')
+@login_required
+def success():
+    return jsonify({'status': True})
+
+
+@APP.route('/welcome', methods=['GET'])
 @login_required
 def welcome():
     '''assures user has points, '''
     try:
-        if 'points' not in user.custom_data:
-            user.custom_data['points'] = 100
+        inits = {'points': 100,
+                 'perks': {},
+                 'checked_in': False,
+                 'last_point': str()}
 
-        if 'perks' not in user.custom_data:
-            user.custom_data['perks'] = {}
+        for k, v in inits.iteritems():
+            if k not in user.custom_data:
+                user.custom_data[k] = v
 
         return jsonify({'status': 'Welcome. You\'re all set to earn points.'})
 
@@ -219,15 +248,19 @@ def postquestion():
     '''post question to bulletin board'''
     try:
         now = utils.bb_dt()
-        payload = json.loads(request.data)
+        payload = {
+            x: y[0] for x, y in dict(request.form.copy()).iteritems()
+        }
+
         payload['modified'] = now
         payload['posted'] = now
         payload['answers'] = 0
         payload['studentid'] = user.email
         payload['name'] = user.full_name
+        print payload
         bulletin.post_question(**payload)
         return jsonify({'status': 'question posted'})
-    except Exception as e:
+    except Error as e:
         return jsonify({'error': e.message})
 
 
@@ -254,13 +287,14 @@ def postanswer():
 
 
 @APP.route('/reportquestions', methods=['GET'])
+@access_control.crossdomain(origin='*')
 @login_required
 def postquestions():
     '''report questions from bulletin board'''
     try:
         questions = bulletin.report_questions()
         return jsonify({'status': questions['bodies']})
-    except Exception as e:
+    except Error as e:
         return jsonify({'error': e.message})
 
 
@@ -293,6 +327,30 @@ def editquestion():
         return jsonify({'status': 'question has been modified'})
     except Exception as e:
         return jsonify({'error': e.message})
+
+
+@APP.route('/build/question', methods=['POST'])
+def buildquestion():
+    questions = json.loads(request.data)
+    # questions = json.loads(qstr)
+    for q in questions:
+        q['posted'] = utils.time_from_now(q['posted'])
+
+    return render_template('question_box.html', questions=questions)
+
+
+@APP.route('/build/perk', methods=['POST'])
+@login_required
+def buildperk():
+    p = json.loads(request.data)
+    return render_template('perk_box.html', perks=p)
+
+@APP.route('/build/<t>', methods=['POST'])
+@login_required
+def buildgeneric(t):
+    g = json.loads(request.data)
+    return render_template('%s_box.html' % t, generic=g)
+
 
 
 @APP.route('/editanswer', methods=['PUT'])
@@ -356,27 +414,45 @@ POST Routes
 """
 
 
+@APP.route('/test/gps', methods=['POST'])
+@login_required
+def testgps():
+    try:
+        print request.data
+        coords = json.loads(request.data)
+        print coords
+        res = utils.decrypt(**coords)
+        print res
+        return jsonify(res)
+    except Error as e:
+        return jsonify({'error': e.message})
+
+
 @APP.route('/checkin', methods=['POST'])
 @login_required
 def checkin():
     '''checkin to campus'''
     try:
         cust = user.custom_data
+        coords = json.loads(request.data)
+        if utils.check_distance(**coords)['distance'] > .378788:    # .378788 miles = 2000 feet
+            return jsonify({'error': 'you are not on campus'})
+
         if cust['checked_in']:
-            return jsonify({'status': 'you are already checked in'})
+            return jsonify({'error': 'you are already checked in'})
 
         else:
             check_res = utils.check_points(user)
             if isinstance(check_res, dict):
                 return jsonify(check_res)
 
-        if utils.check_wifi():
-            user.custom_data['checked_in'] = True
-            user.custom_data['points'] += 10
-            user.custom_data['last_point'] = utils.current_time()
-            return jsonify({'status': 'you are now checked into campus'})
+        # if utils.check_wifi():
+        user.custom_data['checked_in'] = True
+        user.custom_data['points'] += 10
+        user.custom_data['last_point'] = utils.current_time()
+        return jsonify({'status': 'you are now checked into campus'})
 
-        return jsonify({'error': 'not logged into school wifi'})
+        # return jsonify({'error': 'not logged into school wifi'})
 
     except (OSError, IOError) as excp:
         return jsonify({'error': excp.message})
@@ -390,6 +466,14 @@ def checkin():
 def checkup():
     '''earn two more points for staying on campus'''
     try:
+        coords = json.loads(request.data)
+        if utils.check_distance(**coords)['distance'] > .378788:    # .378788 miles = 2000 feet
+            return jsonify({'error':\
+                            '''
+                            You are not on campus. You will be checked
+                            out if you don't return in five minutes.
+                            '''})
+
         if not user.custom_data['checked_in']:
             return jsonify({'error': 'you are not checked in'})
 
@@ -397,13 +481,13 @@ def checkup():
         if isinstance(check_res, dict):
             return jsonify(check_res)
 
-        if utils.check_wifi():
-            user.custom_data['last_point'] = utils.current_time()
-            user.custom_data['points'] += 2
-            name = user.given_name
-            return jsonify({'status': '%s just earned two more points' % name})
-        else:
-            return jsonify({'error': 'not logged into school wifi'})
+        #if utils.check_wifi():
+        user.custom_data['last_point'] = utils.current_time()
+        user.custom_data['points'] += 2
+        name = user.given_name
+        return jsonify({'status': '%s just earned two more points' % name})
+        # else:
+            # return jsonify({'error': 'not logged into school wifi'})
 
     except (OSError, IOError) as excp:
         return jsonify({'error': excp.message})
@@ -452,6 +536,25 @@ def main():
         return jsonify({'error': excp.message})
 
 
+@APP.route('/r/<subreddit>', methods=['GET'])
+@login_required
+def r(subreddit):
+    '''search posts from your favorite subreddits'''
+    try:
+        posts = RED.get_subreddit(subreddit)
+        json = {}
+        for i, post in enumerate(posts.get_hot(limit=50)):
+            json[str(i)] = {'score': post.score,
+                            'title': post.title,
+                            'link': post.url}
+
+        return jsonify(json)
+    except praw.errors.RedirectException:
+        return jsonify({'error': 'that subreddit doesn\'t exist.'})
+    except Exception as e:
+        return jsonify({'error': e.message})
+
+
 @APP.route('/wolfram/query', methods=['POST'])
 @login_required
 def query():
@@ -473,13 +576,12 @@ def profile():
     '''get user profile info'''
     try:
         cust = user.custom_data
-        ret = {'name': user.full_name,
+        ret = {'name': user.given_name,
                'points': cust['points'],
-               'checked_in_status': cust['checked_in'],
+               'checked_in': cust['checked_in'],
                'email': user.email,
                'username': user.username,
                'status': user.status}
-        print dir(user)
         return jsonify(ret)
     except (OSError, IOError) as excp:
         return jsonify({'error': excp.message})

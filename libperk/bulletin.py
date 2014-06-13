@@ -18,6 +18,7 @@ class BaseModel(pw.Model):
 class Questions(BaseModel):
     anonymous = pw.IntegerField(null=True)
     answers = pw.IntegerField()
+    category = pw.IntegerField(null=True)
     modified = pw.DateTimeField()
     name = pw.CharField(max_length=255)
     posted = pw.DateTimeField()

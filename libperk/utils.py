@@ -6,6 +6,10 @@ random home-made functions
 
 from datetime import datetime, timedelta
 from subprocess import PIPE, Popen
+from Crypto.Cipher import AES
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto import Random
+from geopy.distance import vincenty
 import os
 import base64
 
@@ -29,11 +33,30 @@ def execute(fn):
             else:
                 res['bodies'] = [r._data for r in db_res]
 
+            res['status'] = True
             return res
 
         return {'status': 'query executed'}
 
     return wrap
+
+
+
+def decrypt(**kwargs):
+    '''decrypt gps coordinates'''
+    elat = kwargs['latitude']
+    elon = kwargs['longitude']
+    dlat = base64.b64decode(elat)
+    dlon = base64.b64decode(elon)
+    return (float(dlat), float(dlon))
+
+
+def check_distance(**kwargs):
+    '''check distance between campus and student'''
+    school = (34.00673, -118.38574)
+    current = decrypt(**kwargs)
+    distance = vincenty(school, current)
+    return {'distance': distance.miles}
 
 
 def bb_dt():
@@ -46,7 +69,7 @@ def bb_dt():
 def current_time():
     '''get current time'''
     try:
-        time_now = datetime.today()
+        time_now = datetime.now()
         return time_now.strftime('%Y-%m-%d %H:%M:%S')
     except (OSError, IOError) as excp:
         return {'error': excp.message}
@@ -56,21 +79,36 @@ def int_to_days(i):
     return timedelta(i)
 
 
+def sqldt_str_to_dt(s):
+    return datetime.strptime(s, '%a, %d %b %Y %H:%M:%S %Z')
+
+
 def str_to_dt(s):
     return datetime.strptime(s, '%Y-%m-%d %H:%M:%S')
+
+
+def time_from_now(ds):
+    time_now = current_time()
+    time_now_dt = str_to_dt(time_now)
+    ds_dt = sqldt_str_to_dt(ds)
+    diff = time_now_dt - ds_dt
+    return diff.seconds / 60
 
 
 def check_points(user):
     '''check last received point'''
     try:
         last_point = user.custom_data['last_point']
+        if last_point == '':
+            return True
+
         time_now = current_time()
         last_point_dt = str_to_dt(last_point)
         time_now_dt = str_to_dt(time_now)
         current_diff = time_now_dt - last_point_dt
         minutes_passed = current_diff.seconds / 60
         if minutes_passed < 15:
-            message = 'stay checked in for %d more minutes to earn more points'
+            message = 'you are unable to earn points for %d more minutes'
             diff = 15 - int(minutes_passed)
             return {'error': message % diff}
         else:
